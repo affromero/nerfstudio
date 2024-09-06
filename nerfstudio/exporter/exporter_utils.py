@@ -92,7 +92,7 @@ def generate_point_cloud(
     normal_output_name: Optional[str] = None,
     crop_obb: Optional[OrientedBox] = None,
     std_ratio: float = 10.0,
-    hdf5_file: str = "data.h5",
+    hdf5_file: Optional[str] = None,
 ) -> o3d.geometry.PointCloud:
     """Generate a point cloud from a nerf.
 
@@ -124,6 +124,7 @@ def generate_point_cloud(
     view_directions = []
     origins = []
     clips = []
+    depths = []
     count = 0
     with progress as progress_bar:
         task = progress_bar.add_task("Generating Point Cloud", total=num_points)
@@ -174,6 +175,8 @@ def generate_point_cloud(
             point = point[mask]
             view_direction = view_direction[mask]
             rgb = rgba[mask][..., :3]
+            clip = clip[mask]
+            depth = depth[mask]
             if normal is not None:
                 normal = normal[mask]
 
@@ -181,12 +184,15 @@ def generate_point_cloud(
                 mask = crop_obb.within(point)
                 point = point[mask]
                 rgb = rgb[mask]
+                clip = clip[mask]
+                depth = depth[mask]
                 view_direction = view_direction[mask]
                 if normal is not None:
                     normal = normal[mask]
 
             points.append(point)
             rgbs.append(rgb)
+            depths.append(depth)
             clips.append(clip)
             view_directions.append(view_direction)
             origins.append(ray_bundle.origins)
@@ -197,36 +203,37 @@ def generate_point_cloud(
     rgbs = torch.cat(rgbs, dim=0)
     view_directions = torch.cat(view_directions, dim=0).cpu()
     origins = torch.cat(origins, dim=0).cpu()
+    depths = torch.cat(depths, dim=0).cpu()
 
     clips = [torch.unsqueeze(clip, dim=0) for clip in clips]
     clips = torch.cat(clips, dim=0)
     # Create an HDF5 file
     # Change the directory to the location of data.h5
-    CONSOLE.log(f"[bold green]:white_check_mark: Saving H5 file as {hdf5_file}")
-    with h5py.File(hdf5_file, "w") as f:
-        # Create the "origins" group
-        origins_group = f.create_group("origins")
-        # Create the "directions" group
-        directions_group = f.create_group("directions")
-        # Create the "points" group
-        points_group = f.create_group("points")
-        # Create the "clip" group
-        clip_group = f.create_group("clip")
-        # Create the "rgb" group
-        rgb_group = f.create_group("rgb")
-
-        origins_group.create_dataset("origins", data=origins.detach().cpu().numpy())
-        directions_group.create_dataset(
-            "directions", data=view_directions.detach().cpu().numpy()
-        )
-        points_group.create_dataset("points", data=points.detach().cpu().numpy())
-
-        rgb_group.create_dataset("rgb", data=rgbs.detach().cpu().numpy())
-        for scale in range(30):
-            clip_data = clips[:, scale, :].view(-1, 512)
-            clip_group.create_dataset(
-                f"scale_{scale}", data=clip_data.detach().cpu().numpy()
-            )
+    if hdf5_file is not None:
+        CONSOLE.log("Saving H5 file with the following data:")
+        h5_data: dict[str, torch.Tensor] = {}
+        h5_data["origins"] = origins
+        h5_data["directions"] = view_directions
+        h5_data["points"] = points
+        h5_data["clip"] = clips
+        h5_data["rgb"] = rgbs
+        h5_data["depth"] = depths
+        if normal_output_name is not None:
+            normals = torch.cat(normals, dim=0)
+            h5_data["normals"] = normals
+        for k, v in h5_data.items():
+            CONSOLE.log(f"{k}: {v.shape}")
+        CONSOLE.log(f"[bold green]:white_check_mark: Saving H5 file as {hdf5_file}")
+        with h5py.File(hdf5_file, "w") as f:
+            for k, v in h5_data.items():
+                group = f.create_group(k)
+                group.create_dataset(k, data=v.detach().cpu().numpy())
+                if k == "clip":
+                    for scale in range(30):
+                        clip_data = clips[:, scale, :].view(-1, 512)
+                        group.create_dataset(
+                            f"scale_{scale}", data=clip_data.detach().cpu().numpy()
+                        )
 
     import open3d as o3d
 
