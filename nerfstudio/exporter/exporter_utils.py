@@ -18,6 +18,7 @@ Export utils such as structs, point cloud generation, and rendering code.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -123,7 +124,6 @@ def generate_point_cloud(
     normals = []
     view_directions = []
     origins = []
-    clips = []
     depths = []
     count = 0
     with progress as progress_bar:
@@ -148,14 +148,13 @@ def generate_point_cloud(
             rgba = pipeline.model.get_rgba_image(outputs, rgb_output_name)
             depth = outputs[depth_output_name]
             if clip_output_name in outputs:
-                clip = outputs[clip_output_name]
+                clip = outputs[clip_output_name].to(rgba.device) # [points, scales, 512]
             else:
-                clip = torch.ones_like(depth)
+                clip = torch.ones(rgba.shape[0], 1, 512).to(rgba.device)
                 if count == 0:
                     CONSOLE.rule("Warning", style="yellow")
                     CONSOLE.print(f"Could not find {clip_output_name} in the model outputs", justify="center")
                     CONSOLE.print(f"Setting clip to 1.0", justify="center")
-                    count += 1
             if normal_output_name is not None:
                 if normal_output_name not in outputs:
                     CONSOLE.rule("Error", style="red")
@@ -171,7 +170,7 @@ def generate_point_cloud(
             view_direction = ray_bundle.directions
 
             # Filter points with opacity lower than 0.5
-            mask = rgba[..., -1] > 0.5
+            mask = rgba[..., -1] > 0.5 # [bs, num_samples]
             point = point[mask]
             view_direction = view_direction[mask]
             rgb = rgba[mask][..., :3]
@@ -193,47 +192,65 @@ def generate_point_cloud(
             points.append(point)
             rgbs.append(rgb)
             depths.append(depth)
-            clips.append(clip)
             view_directions.append(view_direction)
             origins.append(ray_bundle.origins)
             if normal is not None:
                 normals.append(normal)
             progress.advance(task, point.shape[0])
+            if hdf5_file is not None:
+                # better to create the file first and then append the data
+                # otherwise, clip will gather all the data in memory and it is huge wither for gpu or ram, at least for 24GB GPU
+                if count == 0 and not os.path.isfile(hdf5_file):
+                    # create the file with empty datasets and add empty data with num_points
+                    with h5py.File(hdf5_file, "w") as f:
+                        for k in ["origins", "directions", "points", "clip", "rgb", "depth"]:
+                            group = f.create_group(k)
+                            if k == "clip":
+                                for scale in range(clip.shape[1]):
+                                    group.create_dataset(
+                                        f"scale_{scale}",
+                                        data=np.zeros((num_points, 512)),
+                                    )
+                            else:
+                                group.create_dataset(
+                                    k,
+                                    data=np.zeros((num_points, 3)),
+                                )
+                with h5py.File(hdf5_file, "r+") as f:
+                    for k, v in zip(
+                        ["origins", "directions", "points", "clip", "rgb", "depth"],
+                        [ray_bundle.origins, view_direction, point, clip, rgb, depth],
+                    ):
+                        is_last_step = (count + 1) * point.shape[0] >= num_points
+                        if is_last_step:
+                            v = v[: num_points - count * point.shape[0]].detach().cpu().numpy()
+                        else:
+                            v = v.detach().cpu().numpy()
+                        if k == "clip":
+                            for scale in range(clip.shape[1]):
+                                f[k][f"scale_{scale}"][count * point.shape[0] : (count + 1) * point.shape[0]] = v[:, scale]
+                        else:
+                            f[k][k][count * point.shape[0] : (count + 1) * point.shape[0]] = v
+
+
+            count += 1
     points = torch.cat(points, dim=0)
+    CONSOLE.log(f"Points inferenced: {points.shape[0]}")
     rgbs = torch.cat(rgbs, dim=0)
     view_directions = torch.cat(view_directions, dim=0).cpu()
     origins = torch.cat(origins, dim=0).cpu()
     depths = torch.cat(depths, dim=0).cpu()
-
-    clips = [torch.unsqueeze(clip, dim=0) for clip in clips]
-    clips = torch.cat(clips, dim=0)
     # Create an HDF5 file
     # Change the directory to the location of data.h5
     if hdf5_file is not None:
         CONSOLE.log("Saving H5 file with the following data:")
-        h5_data: dict[str, torch.Tensor] = {}
-        h5_data["origins"] = origins
-        h5_data["directions"] = view_directions
-        h5_data["points"] = points
-        h5_data["clip"] = clips
-        h5_data["rgb"] = rgbs
-        h5_data["depth"] = depths
-        if normal_output_name is not None:
-            normals = torch.cat(normals, dim=0)
-            h5_data["normals"] = normals
-        for k, v in h5_data.items():
-            CONSOLE.log(f"{k}: {v.shape}")
-        CONSOLE.log(f"[bold green]:white_check_mark: Saving H5 file as {hdf5_file}")
-        with h5py.File(hdf5_file, "w") as f:
-            for k, v in h5_data.items():
-                group = f.create_group(k)
-                group.create_dataset(k, data=v.detach().cpu().numpy())
-                if k == "clip":
-                    for scale in range(30):
-                        clip_data = clips[:, scale, :].view(-1, 512)
-                        group.create_dataset(
-                            f"scale_{scale}", data=clip_data.detach().cpu().numpy()
-                        )
+        with h5py.File(hdf5_file, "r+") as f:
+            for k in f.keys():
+                for kk in f[k].keys():
+                    CONSOLE.log(f"{k}/{kk}: {f[k][kk].shape}")
+        h5_size_file = os.path.getsize(hdf5_file)
+        h5_size_file_GB = "{:0.2f}".format(h5_size_file / 1024 ** 3)
+        CONSOLE.log(f"[bold green]:white_check_mark: Stored H5 file as {hdf5_file} with size {h5_size_file_GB}GB.")
 
     import open3d as o3d
 
