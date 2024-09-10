@@ -28,7 +28,7 @@ import sys
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import mediapy as media
 import numpy as np
@@ -730,6 +730,8 @@ class DatasetRender(BaseRender):
     """Split to render."""
     rendered_output_names: Optional[List[str]] = field(default_factory=lambda: None)
     """Name of the renderer outputs to use. rgb, depth, raw-depth, gt-rgb etc. By default all outputs are rendered."""
+    data_manager_config_kwargs: Optional[List[Tuple[str, str]]] = field(default_factory=lambda: None)
+    """Additional kwargs to pass to the data manager config."""
 
     def main(self):
         config: TrainerConfig
@@ -757,19 +759,24 @@ class DatasetRender(BaseRender):
         )
         data_manager_config = config.pipeline.datamanager
         assert isinstance(data_manager_config, (VanillaDataManagerConfig, FullImageDatamanagerConfig))
-
+        if self.data_manager_config_kwargs is None:
+            data_manager_config_kwargs = {}
+        else:
+            data_manager_config_kwargs = dict(self.data_manager_config_kwargs)
+        for k,v in data_manager_config_kwargs.items():
+            data_manager_config_kwargs[k] = eval(v)
         for split in self.split.split("+"):
             datamanager: VanillaDataManager
             dataset: Dataset
             if split == "train":
                 with _disable_datamanager_setup(data_manager_config._target):  # pylint: disable=protected-access
-                    datamanager = data_manager_config.setup(test_mode="test", device=pipeline.device)
+                    datamanager = data_manager_config.setup(test_mode="test", device=pipeline.device, **data_manager_config_kwargs)
 
                 dataset = datamanager.train_dataset
                 dataparser_outputs = getattr(dataset, "_dataparser_outputs", datamanager.train_dataparser_outputs)
             else:
                 with _disable_datamanager_setup(data_manager_config._target):  # pylint: disable=protected-access
-                    datamanager = data_manager_config.setup(test_mode=split, device=pipeline.device)
+                    datamanager = data_manager_config.setup(test_mode=split, device=pipeline.device, **data_manager_config_kwargs)
 
                 dataset = datamanager.eval_dataset
                 dataparser_outputs = getattr(dataset, "_dataparser_outputs", None)
