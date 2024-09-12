@@ -123,7 +123,6 @@ def generate_point_cloud(
     rgbs = []
     normals = []
     view_directions = []
-    origins = []
     depths = []
     count = 0
     with progress as progress_bar:
@@ -176,6 +175,7 @@ def generate_point_cloud(
             rgb = rgba[mask][..., :3]
             clip = clip[mask]
             depth = depth[mask]
+            origin = ray_bundle.origins[mask]
             if normal is not None:
                 normal = normal[mask]
 
@@ -186,6 +186,7 @@ def generate_point_cloud(
                 clip = clip[mask]
                 depth = depth[mask]
                 view_direction = view_direction[mask]
+                origin = origin[mask]
                 if normal is not None:
                     normal = normal[mask]
 
@@ -193,7 +194,6 @@ def generate_point_cloud(
             rgbs.append(rgb)
             depths.append(depth)
             view_directions.append(view_direction)
-            origins.append(ray_bundle.origins)
             if normal is not None:
                 normals.append(normal)
             progress.advance(task, point.shape[0])
@@ -219,7 +219,7 @@ def generate_point_cloud(
                 with h5py.File(hdf5_file, "r+") as f:
                     for k, v in zip(
                         ["origins", "directions", "points", "clip", "rgb", "depth"],
-                        [ray_bundle.origins, view_direction, point, clip, rgb, depth],
+                        [origin, view_direction, point, clip, rgb, depth],
                     ):
                         is_last_step = (count + 1) * point.shape[0] >= num_points
                         if is_last_step:
@@ -238,7 +238,6 @@ def generate_point_cloud(
     CONSOLE.log(f"Points inferenced: {points.shape[0]}")
     rgbs = torch.cat(rgbs, dim=0)
     view_directions = torch.cat(view_directions, dim=0).cpu()
-    origins = torch.cat(origins, dim=0).cpu()
     depths = torch.cat(depths, dim=0).cpu()
     # Create an HDF5 file
     # Change the directory to the location of data.h5

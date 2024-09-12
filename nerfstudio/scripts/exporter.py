@@ -361,8 +361,9 @@ class ExportPoissonMesh(Exporter):
         CONSOLE.print(f"[bold green]:white_check_mark: Generated {pcd}")
 
         if self.save_point_cloud:
-            CONSOLE.print("Saving Point Cloud...")
-            o3d.io.write_point_cloud(str(self.output_dir / "point_cloud.ply"), pcd)
+            point_cloud_file = str(self.output_dir / "point_cloud.ply")
+            CONSOLE.print(f"Saving Point Cloud as {point_cloud_file}")
+            o3d.io.write_point_cloud(point_cloud_file, pcd)
             print("\033[A\033[A")
             CONSOLE.print("[bold green]:white_check_mark: Saving Point Cloud")
 
