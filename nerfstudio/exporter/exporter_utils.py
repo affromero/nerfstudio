@@ -186,6 +186,7 @@ def generate_point_cloud(
                 rgb = rgb[mask]
                 clip = clip[mask]
                 depth = depth[mask]
+                origin = origin[mask]
                 view_direction = view_direction[mask]
                 origin = origin[mask]
                 if normal is not None:
