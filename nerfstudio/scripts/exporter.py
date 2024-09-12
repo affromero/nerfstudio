@@ -128,7 +128,7 @@ class ExportPointCloud(Exporter):
     save_world_frame: bool = False
     """If set, saves the point cloud in the same frame as the original dataset. Otherwise, uses the
     scaled and reoriented coordinate space expected by the NeRF models."""
-    hdf5_file: Optional[str] = None
+    hdf5_file: Optional[Path] = None
     """Path to the HDF5 file to save the point cloud."""
 
     def main(self) -> None:
@@ -315,7 +315,7 @@ class ExportPoissonMesh(Exporter):
     """Target number of faces for the mesh to texture."""
     std_ratio: float = 10.0
     """Threshold based on STD of the average distances across the point cloud to remove outliers."""
-    hdf5_file: Optional[str] = None
+    hdf5_file: Optional[Path] = None
     """Path to the HDF5 file to save the point cloud."""
 
     def main(self) -> None:

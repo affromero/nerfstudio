@@ -19,6 +19,7 @@ Export utils such as structs, point cloud generation, and rendering code.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -93,7 +94,7 @@ def generate_point_cloud(
     normal_output_name: Optional[str] = None,
     crop_obb: Optional[OrientedBox] = None,
     std_ratio: float = 10.0,
-    hdf5_file: Optional[str] = None,
+    hdf5_file: Optional[Path] = None,
 ) -> o3d.geometry.PointCloud:
     """Generate a point cloud from a nerf.
 
@@ -200,7 +201,7 @@ def generate_point_cloud(
             if hdf5_file is not None:
                 # better to create the file first and then append the data
                 # otherwise, clip will gather all the data in memory and it is huge wither for gpu or ram, at least for 24GB GPU
-                if count == 0 and not os.path.isfile(hdf5_file):
+                if count == 0 and not hdf5_file.exists():
                     # create the file with empty datasets and add empty data with num_points
                     with h5py.File(hdf5_file, "w") as f:
                         for k in ["origins", "directions", "points", "clip", "rgb", "depth"]:
