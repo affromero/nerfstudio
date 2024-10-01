@@ -25,9 +25,9 @@ from typing import Dict, List, Literal, Optional, Tuple, Type, Union
 
 import numpy as np
 import torch
-from gsplat.strategy import DefaultStrategy
 
 try:
+    from gsplat.strategy import DefaultStrategy
     from gsplat.rendering import rasterization
 except ImportError:
     print("Please install gsplat>=1.0.0")
